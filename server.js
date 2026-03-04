@@ -1,82 +1,69 @@
 const express = require("express");
-const fs = require("fs");
 const cors = require("cors");
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-const DB_FILE = "database.json";
+let jugadores = {};
+let intentos = {};
+let jackpot = 0;
 
-// Crear DB si no existe
-if (!fs.existsSync(DB_FILE)) {
-  fs.writeFileSync(DB_FILE, JSON.stringify({ users: [] }, null, 2));
+function bloqueActual(){
+return Math.floor(Date.now()/(15*60*1000));
 }
 
-function readDB() {
-  return JSON.parse(fs.readFileSync(DB_FILE));
+app.post("/registrar",(req,res)=>{
+const {nick} = req.body;
+if(!nick) return res.status(400).json({error:"Nick requerido"});
+
+if(!jugadores[nick]){
+jugadores[nick] = { puntos:0 };
 }
 
-function writeDB(data) {
-  fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
+res.json({ok:true});
+});
+
+app.post("/jugar",(req,res)=>{
+const {nick,juego,puntos} = req.body;
+
+if(!nick || juego===undefined)
+return res.status(400).json({error:"Datos inválidos"});
+
+let bloque = bloqueActual();
+let key = `${nick}_${bloque}_${juego}`;
+
+if(!intentos[key]) intentos[key]=0;
+
+if(intentos[key] >= 3)
+return res.json({error:"Sin intentos"});
+
+intentos[key]++;
+
+if(puntos > 0){
+jugadores[nick].puntos += puntos;
+jackpot += 5;
 }
 
-// Registrar usuario
-app.post("/registrar", (req, res) => {
-  const { nick } = req.body;
-  if (!nick) return res.status(400).json({ error: "Nick requerido" });
-
-  const db = readDB();
-  let user = db.users.find(u => u.nick === nick);
-
-  if (!user) {
-    user = {
-      nick,
-      puntos: 0,
-      ultimoIntentoWeb: 0,
-      ultimoIntentoBot: 0
-    };
-    db.users.push(user);
-    writeDB(db);
-  }
-
-  res.json(user);
+res.json({
+ok:true,
+intentosRestantes: 3 - intentos[key],
+jackpot
+});
 });
 
-// Sumar puntos
-app.post("/sumar", (req, res) => {
-  const { nick, puntos } = req.body;
-  if (!nick || !puntos) return res.status(400).json({ error: "Datos incompletos" });
+app.get("/ranking",(req,res)=>{
+let lista = Object.entries(jugadores)
+.map(([nick,data])=>({nick,puntos:data.puntos}))
+.sort((a,b)=>b.puntos-a.puntos)
+.slice(0,10);
 
-  const db = readDB();
-  let user = db.users.find(u => u.nick === nick);
-
-  if (!user) {
-    user = { nick, puntos: 0 };
-    db.users.push(user);
-  }
-
-  user.puntos += puntos;
-  writeDB(db);
-
-  res.json({ puntos: user.puntos });
+res.json(lista);
 });
 
-// Obtener puntos
-app.get("/puntos/:nick", (req, res) => {
-  const db = readDB();
-  const user = db.users.find(u => u.nick === req.params.nick);
-  res.json(user || { nick: req.params.nick, puntos: 0 });
-});
-
-// Ranking
-app.get("/ranking", (req, res) => {
-  const db = readDB();
-  const ranking = [...db.users]
-    .sort((a, b) => b.puntos - a.puntos)
-    .slice(0, 10);
-  res.json(ranking);
+app.get("/jackpot",(req,res)=>{
+res.json({jackpot});
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log("Servidor activo en puerto", PORT));
+app.listen(PORT,()=>console.log("Servidor activo"));
